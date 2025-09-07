@@ -1,63 +1,78 @@
-
-import random
-from datetime import datetime, timedelta
-
-from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
-from listings.models import Booking, Listing, Review
+from django.contrib.auth import get_user_model
+from alx_travel_app.listings.models import Listing
+import random
 
 User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = "Seeds the database with sample listings, bookings, and reviews"
+    help = 'Seeds the database with sample listings data'
 
     def handle(self, *args, **options):
-        self.stdout.write("Deleting existing data...")
-        Listing.objects.all().delete()
-        Booking.objects.all().delete()
-        Review.objects.all().delete()
+        self.stdout.write('🌱 Seeding data...')
+        self.create_hosts()
+        self.create_listings()
+        self.stdout.write(self.style.SUCCESS(
+            '✅ Successfully seeded listings!'))
 
-        self.stdout.write("Creating sample listings...")
-        listings = []
-        for i in range(1, 11):
-            listing = Listing.objects.create(
-                title=f"Beautiful Apartment #{i}",
-                description=f"Spacious apartment with amazing views #{i}",
-                price_per_night=round(random.uniform(50, 300), 2),
-                max_guests=random.randint(1, 8),
+    def create_hosts(self):
+        self.hosts = []
+
+        sample_hosts = [
+            {'email': 'host1@example.com', 'first_name': 'Alice', 'last_name': 'Host'},
+            {'email': 'host2@example.com', 'first_name': 'Bob', 'last_name': 'Host'},
+        ]
+
+        for host in sample_hosts:
+            user, created = User.objects.get_or_create(
+                email=host['email'],
+                defaults={
+                    'first_name': host['first_name'],
+                    'last_name': host['last_name'],
+                    'role': 'host',
+                    'password': 'password123'  # You can update this as needed
+                }
             )
-            listings.append(listing)
-            self.stdout.write(f"Created listing: {listing.title}")
+            if created:
+                user.set_password('password123')
+                user.save()
+            self.hosts.append(user)
 
-        # Create a test user
-        user, created = User.objects.get_or_create(
-            email="test@example.com",
-            defaults={"username": "testuser", "password": "testpassword123"},
-        )
+    def create_listings(self):
+        if Listing.objects.exists():
+            self.stdout.write('Listings already exist. Skipping...')
+            return
 
-        self.stdout.write("Creating sample bookings...")
-        for listing in listings:
-            start_date = datetime.now() + timedelta(days=random.randint(1, 30))
-            end_date = start_date + timedelta(days=random.randint(1, 14))
+        names = [
+            "Cozy Loft Downtown",
+            "Modern Beachside Retreat",
+            "Mountain Cabin Escape",
+            "Stylish Studio Apartment",
+            "Spacious Family Home"
+        ]
 
-            Booking.objects.create(
-                listing=listing,
-                user=user,
-                start_date=start_date,
-                end_date=end_date,
-                status=random.choice(["pending", "confirmed", "cancelled"]),
+        descriptions = [
+            "A comfortable loft in the heart of the city.",
+            "A peaceful getaway with beach views.",
+            "Surround yourself with nature and quiet.",
+            "Perfect spot for solo travelers or couples.",
+            "Plenty of room for large families and groups."
+        ]
+
+        locations = [
+            "New York, NY",
+            "Santa Monica, CA",
+            "Aspen, CO",
+            "Austin, TX",
+            "Orlando, FL"
+        ]
+
+        for i in range(5):
+            Listing.objects.create(
+                host=self.hosts[i % len(self.hosts)],
+                name=names[i],
+                description=descriptions[i],
+                location=locations[i],
+                pricepernight=random.randint(80, 350)
             )
-
-        self.stdout.write("Creating sample reviews...")
-        for listing in listings:
-            Review.objects.create(
-                listing=listing,
-                user=user,
-                rating=random.randint(1, 5),
-                comment=f"Great experience at {listing.title}!",
-            )
-
-        self.stdout.write(
-            self.style.SUCCESS("Database seeding completed successfully!")
-        )

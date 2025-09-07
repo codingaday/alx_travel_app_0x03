@@ -1,143 +1,150 @@
-
+from django.db import models
+from django.conf import settings
+from django.contrib.auth.models import AbstractUser, BaseUserManager
 import uuid
 
-from django.contrib.auth import get_user_model
-from django.db import models
+# Enums
 
-User = get_user_model()
+
+class Roles(models.TextChoices):
+    guest = "guest", "guest"
+    host = "host", "host"
+    admin = "admin", "admin"
+
+
+class Status(models.TextChoices):
+    pending = "pending", "pending"
+    confirmed = "confirmed", "confirmed"
+    canceled = "canceled", "canceled"
+
+
+class payment_status(models.TextChoices):
+    pending = "pending", "pending"
+    success = "success", "success"
+    failed = "failed", "failed"
+
+
+# User Manager
+
+
+class CustomUserManager(BaseUserManager):
+    use_in_migrations = True
+
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError("The email must be set.")
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)  # hashes the password
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Superuser must have is_staff=True.")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
+        return self.create_user(email, password, **extra_fields)
+
+
+# User Model
+
+
+class User(AbstractUser):
+    user_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    first_name = models.CharField(max_length=150)
+    last_name = models.CharField(max_length=150)
+    email = models.EmailField(unique=True)
+    phone_number = models.CharField(max_length=20, blank=True)
+    role = models.CharField(max_length=10, choices=Roles.choices, default=Roles.guest)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    username = None
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = ["first_name", "last_name"]
+
+    objects = CustomUserManager()
+
+    def __str__(self):
+        return self.email
 
 
 class Listing(models.Model):
-    title = models.CharField(max_length=255)
+    property_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    host = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="listings"
+    )
+    name = models.CharField(max_length=255)
     description = models.TextField()
-    price_per_night = models.DecimalField(max_digits=10, decimal_places=2)
-    max_guests = models.PositiveIntegerField()
+    location = models.CharField(max_length=255)
+    pricepernight = models.DecimalField(max_digits=10, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.title
+        return self.name
 
 
 class Booking(models.Model):
-    STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("confirmed", "Confirmed"),
-        ("cancelled", "Cancelled"),
-    ]
-
-    listing = models.ForeignKey(
+    booking_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    property = models.ForeignKey(
         Listing, on_delete=models.CASCADE, related_name="bookings"
     )
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="bookings"
+    )
     start_date = models.DateField()
     end_date = models.DateField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.user.email} - {self.listing.title}"
-
-    @property
-    def total_amount(self):
-        """Calculate the total amount for the booking."""
-        if not self.start_date or not self.end_date or not self.listing:
-            return 0
-        num_nights = (self.end_date - self.start_date).days
-        return self.listing.price_per_night * num_nights
-
-
-class Payment(models.Model):
-    PAYMENT_STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("processing", "Processing"),
-        ("completed", "Completed"),
-        ("failed", "Failed"),
-        ("cancelled", "Cancelled"),
-    ]
-
-    PAYMENT_METHOD_CHOICES = [
-        ("telebirr", "Telebirr"),
-        ("cbe", "CBE Birr"),
-        ("ebirr", "Ebirr"),
-        ("mpesa", "Mpesa"),
-        ("bank", "Bank Transfer"),
-    ]
-
-    # Primary key as UUID for better security
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # Relationship with booking
-    booking = models.OneToOneField(
-        Booking, on_delete=models.CASCADE, related_name="payment"
-    )
-
-    # Payment details
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    currency = models.CharField(max_length=3, default="ETB")
-    payment_method = models.CharField(
-        max_length=20, choices=PAYMENT_METHOD_CHOICES, blank=True
-    )
-
-    # Chapa transaction details
-    transaction_id = models.CharField(max_length=100, unique=True)
-    checkout_url = models.URLField(blank=True, null=True)
-    booking_reference = models.CharField(max_length=100, unique=True)
-
-    # Payment status and metadata
+    total_price = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(
-        max_length=20, choices=PAYMENT_STATUS_CHOICES, default="pending"
+        max_length=10, choices=Status.choices, default=Status.pending
     )
-
-    # User information for payment
-    customer_email = models.EmailField()
-    customer_name = models.CharField(max_length=255)
-    customer_phone = models.CharField(max_length=15, blank=True)
-
-    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-
-    # Additional metadata from Chapa
-    chapa_response_data = models.JSONField(default=dict, blank=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["transaction_id"]),
-            models.Index(fields=["status"]),
-            models.Index(fields=["created_at"]),
-        ]
 
     def __str__(self):
-        return f"Payment {self.booking_reference} - {self.status}"
+        return f"Booking {self.booking_id}"
 
-    @property
-    def is_successful(self):
-        return self.status == "completed"
-
-    @property
-    def is_pending(self):
-        return self.status in ["pending", "processing"]
+    def save(self, *args, **kwargs):
+        """
+        Custom save method to trigger an email task on creation.
+        """
+        # This check is crucial: it determines if the object is being created for the first time.
+        is_new = self._state.adding
+        
+        # First, call the original save method to save the object to the database.
+        # This is important so the object gets an ID.
+        super().save(*args, **kwargs)
+        
+        # If it was a new object, call the Celery task.
+        if is_new:
+            print(f"!!!!!!!!!!!!!! NEW BOOKING SAVED, SENDING TASK FOR ID: {self.booking_id} !!!!!!!!!!!!!!")
+            from .tasks import send_booking_confirmation_email
+            send_booking_confirmation_email.delay(self.booking_id)
 
 
 class Review(models.Model):
-    RATING_CHOICES = [
-        (1, "1 Star"),
-        (2, "2 Stars"),
-        (3, "3 Stars"),
-        (4, "4 Stars"),
-        (5, "5 Stars"),
-    ]
-
-    listing = models.ForeignKey(
+    review_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    property = models.ForeignKey(
         Listing, on_delete=models.CASCADE, related_name="reviews"
     )
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    rating = models.PositiveSmallIntegerField(choices=RATING_CHOICES)
-    comment = models.TextField(blank=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reviews"
+    )
+    rating = models.IntegerField()
+    comment = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.rating} stars for {self.listing.title}"
+        return f"Review {self.review_id} - {self.rating} stars"
+
+
+class Payment(models.Model):
+    booking_reference = models.CharField(max_length=100)
+    transaction_id = models.CharField(max_length=100, blank=True, null=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(
+        max_length=20, default=payment_status.pending, choices=payment_status.choices
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
